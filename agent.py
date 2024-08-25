@@ -7,17 +7,50 @@ import aiohttp
 import asyncio
 from operator import add
 from langgraph.constants import Send
+from langchain_groq import ChatGroq
+import pymupdf
+import pymupdf4llm
+import requests
+import os
+
+SYSTEM_PROMPT = """
+You are a professor teaching a course from the following paper.
+Given the contents of the paper you should output a companion document with three sections
+1) A summary of the paper
+2) A glossary of important terms and keywords, along with their definition and context in the paper
+3) A detailed bibliography that lists the references along with a description of where in the paper they are cited and how they relate to the paper
+"""
+
+SUMMARY_PROMPT = """
+You are a professor teaching a course from the following paper.
+Given the contents of the paper you should output a summary of the paper
+"""
+
+KEYWORD_PROMPT = """
+You are a professor teaching a course from the following paper.
+Given the contents of the paper you should output a glossary of important terms and keywords, along with their definition and context in the paper
+"""
+
+CITATION_PROMPT = """
+You are a professor teaching a course from the following paper.
+Given the contents of the paper you should report the full list of citations along with a description of how each is used in the paper.
+Each citation should report the list of authors (without "Et Al"), the title, and the year.
+"""
 
 
 class ConxualizedKeyword(TypedDict):
     keyword: str
+    definition: str
     local_context: str
     # global_context: str
 
 
 class ConxualizedCitation(TypedDict):
-    citation: str
-    local_context: str
+    title: str
+    authors: list[str]
+    year: int
+    description: str
+    # local_context: str
     # global_context: str
 
 
@@ -35,14 +68,23 @@ class ConxualizedCitationList(TypedDict):
     citations: list[ConxualizedCitation]
 
 
+model_name = "llama-3.1-70b-versatile"
+# model_name = "llama3-70b-8192"
+# model_name = "llama-3.1-8b-instant"
+
+model = ChatGroq(model=model_name)
+keyword_model = model.with_structured_output(ConxualizedKeywordList)
+summary_model = model
+citation_model = model.with_structured_output(ConxualizedCitationList)
+
+
 # Define the state with a built-in messages key
 class ResearchState(MessagesState):
-    user_intent: str
     paper_url: str
     paper_md: str
+    summary: str
     keywords: ConxualizedKeywordList
     citations: ConxualizedCitationList
-    abstracts: Annotated[list[ContextualizedCitationsAbstract], add]
     reading_assistance_md: str
 
 
@@ -94,20 +136,56 @@ async def fetch_abstract(
 # Define the logic for each node
 def input_node(state: ResearchState) -> ResearchState:
     # Logic to process the input paper
-    paper = "markdown"
-
-    return {"paper_md": paper}
+    url = state["paper_url"]
+    r = requests.get(url)
+    doc = pymupdf.Document(stream=r.content)
+    paper = pymupdf4llm.to_markdown(doc)
+    summary = summary_model.invoke(
+        [
+            [
+                "system",
+                SUMMARY_PROMPT,
+            ],
+            ["human", paper],
+        ]
+    ).content
+    return {
+        "paper_md": paper,
+        "summary": summary,
+    }
 
 
 def keyword_extraction_node(state: ResearchState) -> ResearchState:
     # Logic to extract keywords
-    response = llm.structuredOutput(ConxualizedKeywordList)
+    response = keyword_model.invoke(
+        [
+            [
+                "system",
+                KEYWORD_PROMPT,
+            ],
+            ["human", state["paper_md"]],
+        ]
+    )
     return {"keywords": response}
 
 
 def citation_extraction_node(state: ResearchState) -> ResearchState:
     # Logic to extract citations
-    return {"citations": ["citation1", "citation2"]}
+    citations = []
+    # Sometimes it only extracts a small number, or is in the wrong format, run it a few times to be safe
+    for i in range(1):
+        citations.extend(
+            citation_model.invoke(
+                [
+                    [
+                        "system",
+                        CITATION_PROMPT,
+                    ],
+                    ["human", state["paper_md"]],
+                ]
+            )
+        )
+    return {"citations": citations}
 
 
 def contextualization_node(state: ResearchState) -> ResearchState:
