@@ -1,6 +1,9 @@
+pyaudio
+PyQt5
+wave
+groq
 pymupdf
 pymupdf4llm
-groq
 langgraph
 langsmith
 langchain-groq
