@@ -36,7 +36,8 @@ Given the contents of the paper you should output a glossary of important terms 
 CITATION_PROMPT = """
 You are a professor teaching a course from the following paper.
 Given the contents of the paper you should report the full list of citations along with a description of how each is used in the paper.
-Each citation should only include the title with the citation number or description in the format [1] without the authors or year information.
+Each citation should only include the title and the citation number or description in the format without the authors or year information.
+Also include the context of the citation in the paper, meaning how the citation is used or referenced in the paper.
 """
 
 
@@ -52,6 +53,7 @@ class ConxualizedCitation(TypedDict):
     # authors: list[str]
     # year: int
     description: str
+    context: str
     # local_context: str
     # global_context: str
 
@@ -186,9 +188,9 @@ def citation_extraction_node(state: ResearchState) -> ResearchState:
     return {"citations": citations}
 
 
-def contextualization_node(state: ResearchState) -> ResearchState:
-    # Logic to add context to keywords and citations
-    return {"context": "contextualized information"}
+# def contextualization_node(state: ResearchState) -> ResearchState:
+#     # Logic to add context to keywords and citations
+#     return {"context": "contextualized information"}
 
 
 async def abstract_fetching_node(state: ResearchState) -> dict:
@@ -220,22 +222,22 @@ graph = StateGraph(ResearchState)
 graph.add_node("input_node", input_node)
 graph.add_node("keyword_extraction_node", keyword_extraction_node)
 graph.add_node("citation_extraction_node", citation_extraction_node)
-graph.add_node("contextualization_node", contextualization_node)
+# graph.add_node("contextualization_node", contextualization_node)
 graph.add_node("abstract_fetching_node", abstract_fetching_node)
 graph.add_node("reading_assistance_node", reading_assistance_node)
-graph.add_node("final_contextualization_node", final_contextualization_node)
+# graph.add_node("final_contextualization_node", final_contextualization_node)
 
 # Define the edges between nodes
 graph.set_entry_point("input_node")
 graph.add_edge("input_node", "keyword_extraction_node")
 graph.add_edge("input_node", "citation_extraction_node")
-graph.add_edge("keyword_extraction_node", "contextualization_node")
-graph.add_edge("citation_extraction_node", "contextualization_node")
+# graph.add_edge("keyword_extraction_node", "contextualization_node")
+# graph.add_edge("citation_extraction_node", "contextualization_node")
 graph.add_edge("citation_extraction_node", "abstract_fetching_node")
-graph.add_edge("contextualization_node", "reading_assistance_node")
+graph.add_edge("keyword_extraction_node", "reading_assistance_node")
 graph.add_edge("abstract_fetching_node", "reading_assistance_node")
-graph.add_edge("reading_assistance_node", "final_contextualization_node")
-graph.set_finish_point("final_contextualization_node")
+# graph.add_edge("reading_assistance_node", "final_contextualization_node")
+graph.set_finish_point("reading_assistance_node")
 
 # Compile the graph
 app = graph.compile()
