@@ -12,6 +12,8 @@ import pymupdf
 import pymupdf4llm
 import requests
 import os
+from langchain.output_parsers import PydanticOutputParser
+
 
 SYSTEM_PROMPT = """
 You are a professor teaching a course from the following paper.
@@ -34,7 +36,7 @@ Given the contents of the paper you should output a glossary of important terms 
 CITATION_PROMPT = """
 You are a professor teaching a course from the following paper.
 Given the contents of the paper you should report the full list of citations along with a description of how each is used in the paper.
-Each citation should report the list of authors (without "Et Al"), the title, and the year.
+Each citation should only include the title with the citation number or description in the format [1] without the authors or year information.
 """
 
 
@@ -47,15 +49,15 @@ class ConxualizedKeyword(TypedDict):
 
 class ConxualizedCitation(TypedDict):
     title: str
-    authors: list[str]
-    year: int
+    # authors: list[str]
+    # year: int
     description: str
     # local_context: str
     # global_context: str
 
 
 class ContextualizedCitationsAbstract(TypedDict):
-    citations: str
+    citation: str
     context: str
     abstract: str
 
@@ -171,11 +173,12 @@ def keyword_extraction_node(state: ResearchState) -> ResearchState:
 
 def citation_extraction_node(state: ResearchState) -> ResearchState:
     # Logic to extract citations
+    parser = PydanticOutputParser(pydantic_object=ConxualizedCitationList)
     citations = citation_model.invoke(
         [
             [
                 "system",
-                CITATION_PROMPT,
+                CITATION_PROMPT,  # + parser.get_format_instructions(),
             ],
             ["human", state["paper_md"]],
         ]
