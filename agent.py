@@ -1,8 +1,12 @@
-from langgraph.graph import StateGraph, MessagesState, END
-from typing import TypedDict
+from langgraph.graph import StateGraph, MessagesState
+from typing import TypedDict, Annotated
 import requests
 from xml.etree import ElementTree
 from urllib.parse import quote
+import aiohttp
+import asyncio
+from operator import add
+from langgraph.constants import Send
 
 
 class ConxualizedKeyword(TypedDict):
@@ -17,7 +21,7 @@ class ConxualizedCitation(TypedDict):
     # global_context: str
 
 
-class ContextualizedCitationsAbstracts(TypedDict):
+class ContextualizedCitationsAbstract(TypedDict):
     citations: str
     context: str
     abstract: str
@@ -38,43 +42,53 @@ class ResearchState(MessagesState):
     paper_md: str
     keywords: ConxualizedKeywordList
     citations: ConxualizedCitationList
+    abstracts: Annotated[list[ContextualizedCitationsAbstract], add]
     reading_assistance_md: str
 
 
-def get_arxiv_paper_details(title, authors=None, year=None):
+async def get_arxiv_paper_details(title):
     base_url = "http://export.arxiv.org/api/query"
 
-    # Construct the query
-    query_parts = [f'ti:"{quote(title)}"']
-    if authors:
-        author_query = " AND ".join(f'au:"{quote(author)}"' for author in authors)
-        query_parts.append(f"({author_query})")
-    if year:
-        query_parts.append(f"submittedDate:[{year}0101 TO {year}1231]")
+    # Construct the query using only the title
+    query = f'ti:"{quote(title)}"'
 
-    query = " AND ".join(query_parts)
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"{base_url}?search_query={query}") as response:
+            if response.status == 200:
+                content = await response.text()
+                root = ElementTree.fromstring(content)
+                for entry in root.findall("{http://www.w3.org/2005/Atom}entry"):
+                    paper_title = entry.find("{http://www.w3.org/2005/Atom}title").text
+                    paper_authors = [
+                        author.find("{http://www.w3.org/2005/Atom}name").text
+                        for author in entry.findall(
+                            "{http://www.w3.org/2005/Atom}author"
+                        )
+                    ]
+                    abstract = entry.find("{http://www.w3.org/2005/Atom}summary").text
+                    published_date = entry.find(
+                        "{http://www.w3.org/2005/Atom}published"
+                    ).text
+                    paper_year = published_date.split("-")[0]
+                    return {
+                        "title": paper_title,
+                        "authors": paper_authors,
+                        "abstract": abstract,
+                        "year": paper_year,
+                    }
+            return None
 
-    response = requests.get(f"{base_url}?search_query={query}")
 
-    if response.status_code == 200:
-        root = ElementTree.fromstring(response.content)
-        for entry in root.findall("{http://www.w3.org/2005/Atom}entry"):
-            paper_title = entry.find("{http://www.w3.org/2005/Atom}title").text
-            authors = [
-                author.find("{http://www.w3.org/2005/Atom}name").text
-                for author in entry.findall("{http://www.w3.org/2005/Atom}author")
-            ]
-            abstract = entry.find("{http://www.w3.org/2005/Atom}summary").text
-            published_date = entry.find("{http://www.w3.org/2005/Atom}published").text
-            year = published_date.split("-")[0]
-            return {
-                "title": paper_title,
-                "authors": authors,
-                "abstract": abstract,
-                "year": year,
-            }
-    else:
-        return None
+async def fetch_abstract(
+    citation: ConxualizedCitation,
+) -> ContextualizedCitationsAbstract:
+    # Simulate fetching abstract (replace with actual API call)
+    await asyncio.sleep(1)  # Simulating network delay
+    return {
+        "citation": citation["citation"],
+        "context": citation["local_context"],
+        "abstract": f"Abstract for {citation['citation']}",
+    }
 
 
 # Define the logic for each node
@@ -101,9 +115,16 @@ def contextualization_node(state: ResearchState) -> ResearchState:
     return {"context": "contextualized information"}
 
 
-def abstract_fetching_node(state: ResearchState) -> ResearchState:
-    # Logic to fetch abstracts for citations
-    return {"abstracts": ["abstract1", "abstract2"]}
+async def abstract_fetching_node(state: ResearchState) -> dict:
+    citations = state["citations"]["citations"]
+
+    # Use asyncio.gather to fetch abstracts concurrently
+    abstracts = await asyncio.gather(
+        *[fetch_abstract(citation) for citation in citations]
+    )
+
+    # Return the list of abstracts to be combined using the `add` reducer
+    return {"abstracts": abstracts}
 
 
 def reading_assistance_node(state: ResearchState) -> ResearchState:
