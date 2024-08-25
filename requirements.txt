@@ -1,4 +1,8 @@
 pyaudio
+# Audio (choose one):
+# pyaudio==0.2.11  # Uncomment if you resolve the build issue
+sounddevice  # Alternative to pyaudio
+
 PyQt5
 wave
 groq
