@@ -59,8 +59,9 @@ class ConxualizedCitation(TypedDict):
 
 
 class ContextualizedCitationsAbstract(TypedDict):
-    citation: str
+    description: str
     context: str
+    title: str
     abstract: str
 
 
@@ -89,6 +90,7 @@ class ResearchState(MessagesState):
     summary: str
     keywords: ConxualizedKeywordList
     citations: ConxualizedCitationList
+    abstracts: list[ContextualizedCitationsAbstract]
     reading_assistance_md: str
 
 
@@ -125,26 +127,14 @@ async def get_arxiv_paper_details(title):
             return None
 
 
-async def fetch_abstract(
-    citation: ConxualizedCitation,
-) -> ContextualizedCitationsAbstract:
-    # Simulate fetching abstract (replace with actual API call)
-    await asyncio.sleep(1)  # Simulating network delay
-    return {
-        "citation": citation["citation"],
-        "context": citation["local_context"],
-        "abstract": f"Abstract for {citation['citation']}",
-    }
-
-
 # Define the logic for each node
-def input_node(state: ResearchState) -> ResearchState:
+async def input_node(state: ResearchState) -> ResearchState:
     # Logic to process the input paper
     url = state["paper_url"]
     r = requests.get(url)
     doc = pymupdf.Document(stream=r.content)
     paper = pymupdf4llm.to_markdown(doc)
-    summary = summary_model.invoke(
+    summary = await summary_model.ainvoke(
         [
             [
                 "system",
@@ -152,16 +142,16 @@ def input_node(state: ResearchState) -> ResearchState:
             ],
             ["human", paper],
         ]
-    ).content
+    )
     return {
         "paper_md": paper,
-        "summary": summary,
+        "summary": summary.content,
     }
 
 
-def keyword_extraction_node(state: ResearchState) -> ResearchState:
+async def keyword_extraction_node(state: ResearchState) -> ResearchState:
     # Logic to extract keywords
-    response = keyword_model.invoke(
+    response = await keyword_model.ainvoke(
         [
             [
                 "system",
@@ -173,10 +163,10 @@ def keyword_extraction_node(state: ResearchState) -> ResearchState:
     return {"keywords": response}
 
 
-def citation_extraction_node(state: ResearchState) -> ResearchState:
+async def citation_extraction_node(state: ResearchState) -> ResearchState:
     # Logic to extract citations
-    parser = PydanticOutputParser(pydantic_object=ConxualizedCitationList)
-    citations = citation_model.invoke(
+    # parser = PydanticOutputParser(pydantic_object=ConxualizedCitationList)
+    citations = await citation_model.ainvoke(
         [
             [
                 "system",
@@ -193,26 +183,36 @@ def citation_extraction_node(state: ResearchState) -> ResearchState:
 #     return {"context": "contextualized information"}
 
 
-async def abstract_fetching_node(state: ResearchState) -> dict:
+async def abstract_fetching_node(state: ResearchState) -> ResearchState:
+    # Extract citations from state
     citations = state["citations"]["citations"]
 
-    # Use asyncio.gather to fetch abstracts concurrently
-    abstracts = await asyncio.gather(
-        *[fetch_abstract(citation) for citation in citations]
-    )
+    abstracts = []
+    for citation in citations:
+        title = citation["title"]
+        paper_details = await get_arxiv_paper_details(title)
+        if paper_details:
+            abstract = ContextualizedCitationsAbstract(
+                description=citation["description"],
+                context=citation["context"],
+                title=paper_details["title"],
+                abstract=paper_details["abstract"],
+            )
+            abstracts.append(abstract)
+        else:
+            print(f"Paper not found: {title}")
 
-    # Return the list of abstracts to be combined using the `add` reducer
     return {"abstracts": abstracts}
 
 
-def reading_assistance_node(state: ResearchState) -> ResearchState:
+async def reading_assistance_node(state: ResearchState) -> ResearchState:
     # Logic to provide reading assistance
-    return {"reading_assistance": "assistance context"}
+    return {"reading_assistance_md": "assistance context"}
 
 
-def final_contextualization_node(state: ResearchState) -> ResearchState:
-    # Logic to finalize the contextualization
-    return {"messages": [("system", "Final contextualization complete")]}
+# def final_contextualization_node(state: ResearchState) -> ResearchState:
+#     # Logic to finalize the contextualization
+#     return {"messages": [("system", "Final contextualization complete")]}
 
 
 # Create the graph
@@ -225,7 +225,7 @@ graph.add_node("citation_extraction_node", citation_extraction_node)
 # graph.add_node("contextualization_node", contextualization_node)
 graph.add_node("abstract_fetching_node", abstract_fetching_node)
 graph.add_node("reading_assistance_node", reading_assistance_node)
-# graph.add_node("final_contextualization_node", final_contextualization_node)
+# graph.add_node("final_contextualization_node", final_contextualization_nodes)
 
 # Define the edges between nodes
 graph.set_entry_point("input_node")
