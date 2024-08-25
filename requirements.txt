@@ -2,3 +2,8 @@ pyaudio
 PyQt5
 wave
 groq
+pymupdf
+pymupdf4llm
+langgraph
+langsmith
+langchain-groq
