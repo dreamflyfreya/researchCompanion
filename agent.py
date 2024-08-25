@@ -171,20 +171,15 @@ def keyword_extraction_node(state: ResearchState) -> ResearchState:
 
 def citation_extraction_node(state: ResearchState) -> ResearchState:
     # Logic to extract citations
-    citations = []
-    # Sometimes it only extracts a small number, or is in the wrong format, run it a few times to be safe
-    for i in range(1):
-        citations.extend(
-            citation_model.invoke(
-                [
-                    [
-                        "system",
-                        CITATION_PROMPT,
-                    ],
-                    ["human", state["paper_md"]],
-                ]
-            )
-        )
+    citations = citation_model.invoke(
+        [
+            [
+                "system",
+                CITATION_PROMPT,
+            ],
+            ["human", state["paper_md"]],
+        ]
+    )
     return {"citations": citations}
 
 
