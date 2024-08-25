@@ -13,6 +13,7 @@ import pymupdf4llm
 import requests
 import os
 from langchain.output_parsers import PydanticOutputParser
+from aiohttp import ClientError, ClientTimeout
 
 
 SYSTEM_PROMPT = """
@@ -96,35 +97,46 @@ class ResearchState(MessagesState):
 
 async def get_arxiv_paper_details(title):
     base_url = "http://export.arxiv.org/api/query"
-
-    # Construct the query using only the title
     query = f'ti:"{quote(title)}"'
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(f"{base_url}?search_query={query}") as response:
-            if response.status == 200:
-                content = await response.text()
-                root = ElementTree.fromstring(content)
-                for entry in root.findall("{http://www.w3.org/2005/Atom}entry"):
-                    paper_title = entry.find("{http://www.w3.org/2005/Atom}title").text
-                    paper_authors = [
-                        author.find("{http://www.w3.org/2005/Atom}name").text
-                        for author in entry.findall(
-                            "{http://www.w3.org/2005/Atom}author"
-                        )
-                    ]
-                    abstract = entry.find("{http://www.w3.org/2005/Atom}summary").text
-                    published_date = entry.find(
-                        "{http://www.w3.org/2005/Atom}published"
-                    ).text
-                    paper_year = published_date.split("-")[0]
-                    return {
-                        "title": paper_title,
-                        "authors": paper_authors,
-                        "abstract": abstract,
-                        "year": paper_year,
-                    }
-            return None
+        try:
+            async with session.get(
+                f"{base_url}?search_query={query}", timeout=10
+            ) as response:
+                if response.status == 200:
+                    content = await response.text()
+                    root = ElementTree.fromstring(content)
+                    for entry in root.findall("{http://www.w3.org/2005/Atom}entry"):
+                        paper_title = entry.find(
+                            "{http://www.w3.org/2005/Atom}title"
+                        ).text
+                        paper_authors = [
+                            author.find("{http://www.w3.org/2005/Atom}name").text
+                            for author in entry.findall(
+                                "{http://www.w3.org/2005/Atom}author"
+                            )
+                        ]
+                        abstract = entry.find(
+                            "{http://www.w3.org/2005/Atom}summary"
+                        ).text
+                        published_date = entry.find(
+                            "{http://www.w3.org/2005/Atom}published"
+                        ).text
+                        paper_year = published_date.split("-")[0]
+                        return {
+                            "title": paper_title,
+                            "authors": paper_authors,
+                            "abstract": abstract,
+                            "year": paper_year,
+                        }
+                else:
+                    print(f"Error fetching paper details: HTTP {response.status}")
+        except asyncio.TimeoutError:
+            print(f"Timeout while fetching details for '{title}'")
+        except aiohttp.ClientError as e:
+            print(f"Client error while fetching details for '{title}': {e}")
+    return None
 
 
 # Define the logic for each node
@@ -184,13 +196,25 @@ async def citation_extraction_node(state: ResearchState) -> ResearchState:
 
 
 async def abstract_fetching_node(state: ResearchState) -> ResearchState:
-    # Extract citations from state
     citations = state["citations"]["citations"]
-
     abstracts = []
-    for citation in citations:
-        title = citation["title"]
-        paper_details = await get_arxiv_paper_details(title)
+
+    async def fetch_with_retry(title, max_retries=3, delay=1):
+        for attempt in range(max_retries):
+            try:
+                return await get_arxiv_paper_details(title)
+            except (asyncio.CancelledError, ClientError) as e:
+                if attempt == max_retries - 1:
+                    print(
+                        f"Failed to fetch details for '{title}' after {max_retries} attempts: {e}"
+                    )
+                    return None
+                await asyncio.sleep(delay * (2**attempt))  # Exponential backoff
+
+    tasks = [fetch_with_retry(citation["title"]) for citation in citations]
+    paper_details_list = await asyncio.gather(*tasks)
+
+    for citation, paper_details in zip(citations, paper_details_list):
         if paper_details:
             abstract = ContextualizedCitationsAbstract(
                 description=citation["description"],
@@ -200,7 +224,7 @@ async def abstract_fetching_node(state: ResearchState) -> ResearchState:
             )
             abstracts.append(abstract)
         else:
-            print(f"Paper not found: {title}")
+            print(f"Paper not found or failed to fetch: {citation['title']}")
 
     return {"abstracts": abstracts}
 
@@ -243,6 +267,6 @@ graph.set_finish_point("reading_assistance_node")
 app = graph.compile()
 
 
-url = "https://arxiv.org/pdf/2310.04406"
-response = app.invoke({"paper_url": url})
-print(response)
+# url = "https://arxiv.org/pdf/2310.04406"
+# response = app.ainvoke({"paper_url": url})
+# print(response)
