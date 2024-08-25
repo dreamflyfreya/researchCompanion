@@ -4,7 +4,7 @@ import sounddevice as sd
 from scipy.io import wavfile
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QVBoxLayout, QLabel
 from PyQt5.QtCore import QTimer
-from groq_caller import speechtoText
+from groq_caller import speechtoText, texttospeech
 
 class AudioRecorder(QWidget):
     def __init__(self):
@@ -56,7 +56,7 @@ class AudioRecorder(QWidget):
         wavfile.write('output.wav', self.sample_rate, self.recording)
         print("Recording saved as 'output.wav'")
         self.statusLabel.setText('Recording saved as output.wav')
-        speechtoText()
+        texttospeech(speechtoText())
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     ex = AudioRecorder()
